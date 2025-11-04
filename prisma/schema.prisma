@@ -1,0 +1,70 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model A {
+  id            String   @id @default(uuid())
+  title         String
+  slug          String?
+  desc          String
+  category      String
+  price         Float
+  image         String?
+  dynamicModels DynamicModel[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model DynamicModel {
+  id        String   @id @default(uuid())
+  name      String
+  aId       String
+  a         A        @relation(fields: [aId], references: [id])
+
+  // 反向關係：一個 DynamicModel 包含多個 fields 和 dataRows
+  fields    DynamicField[]
+  dataRows  DynamicData[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([aId, name])
+}
+
+// prisma/schema.prisma (新增欄位)
+model DynamicField {
+  id             String       @id @default(uuid())
+  label          String
+  key            String
+  type           String       // 新增 "model" 類型
+  options        Json?
+  required       Boolean      @default(false)
+  dynamicModelId String
+  dynamicModel   DynamicModel @relation(fields: [dynamicModelId], references: [id])
+
+  // 新增：當 type="model" 時，指向目標模型
+  refModelId     String?
+  refModel       DynamicModel? @relation("ModelReference", fields: [refModelId], references: [id])
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([dynamicModelId, key])
+}
+
+model DynamicData {
+  id             String       @id @default(uuid())
+  dynamicModelId String
+  dynamicModel   DynamicModel @relation(fields: [dynamicModelId], references: [id])
+  data           Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
