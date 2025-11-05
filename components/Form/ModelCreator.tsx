@@ -1,17 +1,19 @@
 // components/ModelCreator.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 
+// 擴充 type 包含 "model"
 const fieldSchema = z.object({
   label: z.string().min(1, '欄位名稱必填'),
   key: z.string().min(1, '鍵名必填').regex(/^[a-zA-Z0-9_]+$/, '僅限字母數字下劃線'),
-  type: z.enum(['text', 'number', 'select', 'boolean']),
+  type: z.enum(['text', 'number', 'select', 'boolean', 'model']), // 新增 'model'
   options: z.string().optional(),
-  required: z.boolean(), // 必須是 boolean，不是 optional
+  required: z.boolean(),
+  refModelId: z.string().optional(), // 當 type="model" 時使用
 });
 
 const schema = z.object({
@@ -21,6 +23,11 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>;
 
+type Model = {
+  id: string;
+  name: string;
+};
+
 type ModelCreatorProps = {
   aId: string;
   onSuccess: () => void;
@@ -29,11 +36,23 @@ type ModelCreatorProps = {
 export function ModelCreator({ aId, onSuccess }: ModelCreatorProps) {
   const [show, setShow] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [availableModels, setAvailableModels] = useState<Model[]>([]);
+
+  // 載入同商品下的其他模型（供選擇）
+  useEffect(() => {
+    if (show) {
+      fetch(`/api/a/${aId}/models`)
+        .then(res => res.json())
+        .then(data => setAvailableModels(data || []))
+        .catch(() => setAvailableModels([]));
+    }
+  }, [show, aId]);
 
   const {
     register,
     control,
     handleSubmit,
+    watch,
     formState: { errors },
     reset,
   } = useForm<FormData>({
@@ -44,9 +63,10 @@ export function ModelCreator({ aId, onSuccess }: ModelCreatorProps) {
         {
           label: '',
           key: '',
-          type: 'text' as const,
+          type: 'text',
           required: false,
           options: undefined,
+          refModelId: undefined,
         },
       ],
     },
@@ -57,6 +77,9 @@ export function ModelCreator({ aId, onSuccess }: ModelCreatorProps) {
     name: 'fields',
   });
 
+  // 監聽每個欄位的 type
+  const watchedFields = watch('fields');
+
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
     try {
@@ -66,8 +89,12 @@ export function ModelCreator({ aId, onSuccess }: ModelCreatorProps) {
         body: JSON.stringify({
           name: data.name,
           fields: data.fields.map((f) => ({
-            ...f,
-            options: f.type === 'select' ? f.options?.split(',').map((o) => o.trim()).filter(Boolean) || null : null,
+            label: f.label,
+            key: f.key,
+            type: f.type,
+            options: f.type === 'select' ? f.options?.split(',').map(o => o.trim()).filter(Boolean) || null : null,
+            required: f.required,
+            refModelId: f.type === 'model' ? f.refModelId : null,
           })),
         }),
       });
@@ -115,91 +142,107 @@ export function ModelCreator({ aId, onSuccess }: ModelCreatorProps) {
               <label className="font-medium">欄位</label>
               <button
                 type="button"
-                onClick={() => append({ label: '', key: '', type: 'text', required: false })}
+                onClick={() =>
+                  append({
+                    label: '',
+                    key: '',
+                    type: 'text',
+                    required: false,
+                    options: undefined,
+                    refModelId: undefined,
+                  })
+                }
                 className="text-sm text-blue-600 hover:underline"
               >
                 + 新增欄位
               </button>
             </div>
 
-            {fields.map((field, index) => (
-              <div key={field.id} className="border rounded p-3 mb-3 space-y-2 bg-gray-50">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  <input
-                    {...register(`fields.${index}.label`)}
-                    placeholder="顯示名稱"
-                    className="border rounded p-1 text-sm"
-                  />
-                  <input
-                    {...register(`fields.${index}.key`)}
-                    placeholder="鍵名 (key)"
-                    className="border rounded p-1 text-sm"
-                  />
-                </div>
+            {fields.map((field, index) => {
+              const fieldType = watchedFields[index]?.type;
 
-                <div className="grid grid-cols-2 gap-2">
-                  <select
-                    {...register(`fields.${index}.type`)}
-                    className="border rounded p-1 text-sm"
-                  >
-                    <option value="text">文字</option>
-                    <option value="number">數字</option>
-                    <option value="select">下拉選單</option>
-                    <option value="boolean">是/否</option>
-                  </select>
-
-                  <label className="flex items-center space-x-1 text-sm">
+              return (
+                <div key={field.id} className="border rounded p-3 mb-3 space-y-2 bg-gray-50">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     <input
-                      type="checkbox"
-                      {...register(`fields.${index}.required`)}
-                      className="w-4 h-4"
+                      {...register(`fields.${index}.label`)}
+                      placeholder="顯示名稱"
+                      className="border rounded p-1 text-sm"
                     />
-                    <span>必填</span>
-                  </label>
-                </div>
+                    <input
+                      {...register(`fields.${index}.key`)}
+                      placeholder="鍵名 (key)"
+                      className="border rounded p-1 text-sm"
+                    />
+                  </div>
 
-                {/* 動態顯示 options 輸入框 */}
-                {field.type === 'select' && (
-                  <input
-                    {...register(`fields.${index}.options`)}
-                    placeholder="選項用逗號分隔：紅,藍,綠"
-                    className="w-full border rounded p-1 text-sm"
-                  />
-                )}
-
-                {/* // components/ModelCreator.tsx (關鍵修改) */}
-                    {field.type === 'model' && (
+                  <div className="grid grid-cols-2 gap-2">
                     <select
-                        {...register(`fields.${index}.refModelId`)}
-                        className="w-full border rounded p-1 text-sm"
+                      {...register(`fields.${index}.type`)}
+                      className="border rounded p-1 text-sm"
                     >
-                        <option value="">選擇子模型</option>
-                        {availableModels.map(m => (
-                        <option key={m.id} value={m.id}>
+                      <option value="text">文字</option>
+                      <option value="number">數字</option>
+                      <option value="select">下拉選單</option>
+                      <option value="boolean">是/否</option>
+                      <option value="model">子模型</option>
+                    </select>
+
+                    <label className="flex items-center space-x-1 text-sm">
+                      <input
+                        type="checkbox"
+                        {...register(`fields.${index}.required`)}
+                        className="w-4 h-4"
+                      />
+                      <span>必填</span>
+                    </label>
+                  </div>
+
+                  {/* Select 選項 */}
+                  {fieldType === 'select' && (
+                    <input
+                      {...register(`fields.${index}.options`)}
+                      placeholder="選項用逗號分隔：紅,藍,綠"
+                      className="w-full border rounded p-1 text-sm"
+                    />
+                  )}
+
+                  {/* Model 選擇器 */}
+                  {fieldType === 'model' && (
+                    <select
+                      {...register(`fields.${index}.refModelId`)}
+                      className="w-full border rounded p-1 text-sm"
+                    >
+                      <option value="">選擇子模型</option>
+                      {availableModels
+                        .filter(m => m.id !== 'current') // 避免自我引用（可選）
+                        .map(m => (
+                          <option key={m.id} value={m.id}>
                             {m.name} (ID: {m.id.slice(0, 8)})
-                        </option>
+                          </option>
                         ))}
                     </select>
-                    )}
+                  )}
 
+                  <button
+                    type="button"
+                    onClick={() => remove(index)}
+                    className="text-xs text-red-500 hover:underline"
+                  >
+                    移除欄位
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => remove(index)}
-                  className="text-xs text-red-500 hover:underline"
-                >
-                  移除欄位
-                </button>
-
-                {errors.fields?.[index] && (
-                  <p className="text-red-500 text-xs">
-                    {errors.fields[index]?.label?.message || 
-                     errors.fields[index]?.key?.message ||
-                     errors.fields[index]?.type?.message}
-                  </p>
-                )}
-              </div>
-            ))}
+                  {errors.fields?.[index] && (
+                    <p className="text-red-500 text-xs">
+                      {errors.fields[index]?.label?.message ||
+                       errors.fields[index]?.key?.message ||
+                       errors.fields[index]?.type?.message ||
+                       errors.fields[index]?.refModelId?.message}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           <div className="flex gap-2 justify-end">

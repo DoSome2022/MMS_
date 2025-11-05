@@ -10,53 +10,54 @@ datasource db {
 }
 
 model A {
-  id            String   @id @default(uuid())
+  id            String         @id @default(uuid())
   title         String
-  slug          String?
+  slug          String?        @unique
   desc          String
   category      String
   price         Float
   image         String?
   dynamicModels DynamicModel[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 }
 
-model DynamicModel {
-  id        String   @id @default(uuid())
-  name      String
-  aId       String
-  a         A        @relation(fields: [aId], references: [id])
-
-  // 反向關係：一個 DynamicModel 包含多個 fields 和 dataRows
-  fields    DynamicField[]
-  dataRows  DynamicData[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([aId, name])
-}
-
-// prisma/schema.prisma (新增欄位)
 model DynamicField {
   id             String       @id @default(uuid())
   label          String
   key            String
-  type           String       // 新增 "model" 類型
+  type           String // text, number, select, boolean, model
   options        Json?
   required       Boolean      @default(false)
   dynamicModelId String
   dynamicModel   DynamicModel @relation(fields: [dynamicModelId], references: [id])
 
-  // 新增：當 type="model" 時，指向目標模型
-  refModelId     String?
-  refModel       DynamicModel? @relation("ModelReference", fields: [refModelId], references: [id])
+  // 指向另一個模型
+  refModelId String?
+  refModel   DynamicModel? @relation("ModelReference", fields: [refModelId], references: [id])
 
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([dynamicModelId, key])
+}
+
+model DynamicModel {
+  id   String @id @default(uuid())
+  name String
+  aId  String
+  a    A      @relation(fields: [aId], references: [id])
+
+  fields   DynamicField[]
+  dataRows DynamicData[]
+
+  // 必須加這行！反向關係
+  referencedBy DynamicField[] @relation("ModelReference")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([aId, name])
 }
 
 model DynamicData {
