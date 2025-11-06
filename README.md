@@ -6,3 +6,7 @@
 05112025
 
 已完成了動態path 以及 動態DB BACKEND ,但是client side 頁面未解決
+
+06112025
+
+編輯欄位結構 有bug

@@ -6,30 +6,26 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;  // 正確取得 id
-  const body = await req.json();
-
-  // 驗證 id 是否存在
-  if (!id) {
-    return NextResponse.json({ error: 'Model ID is required' }, { status: 400 });
-  }
+  const { id: modelId } = await params;
 
   try {
+    const body = await req.json();
+    const { parentId, ...data } = body;
+
     const row = await db.dynamicData.create({
       data: {
-        dynamicModelId: id,  // 確保傳入正確 id
-        data: body,          // body 就是 { key: value }
+        dynamicModelId: modelId,
+        data: data as any,
+        parentId: parentId || null,
       },
     });
 
     return NextResponse.json(row, { status: 201 });
   } catch (error: any) {
-    console.error('POST /dynamic-model/[id]/data error:', error);
-
-    if (error.code === 'P2003') {
-      return NextResponse.json({ error: 'Invalid model ID' }, { status: 400 });
-    }
-
-    return NextResponse.json({ error: 'Failed to create data' }, { status: 500 });
+    console.error('Create data error:', error);
+    return NextResponse.json(
+      { error: 'Failed', details: error.message },
+      { status: 500 }
+    );
   }
 }

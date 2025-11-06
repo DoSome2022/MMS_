@@ -22,50 +22,49 @@ model A {
   updatedAt     DateTime       @updatedAt
 }
 
-model DynamicField {
-  id             String       @id @default(uuid())
-  label          String
-  key            String
-  type           String // text, number, select, boolean, model
-  options        Json?
-  required       Boolean      @default(false)
-  dynamicModelId String
-  dynamicModel   DynamicModel @relation(fields: [dynamicModelId], references: [id])
+model DynamicModel {
+  id        String   @id @default(cuid())
+  name      String
+  aId       String
+  a         A        @relation(fields: [aId], references: [id])
 
-  // 指向另一個模型
-  refModelId String?
-  refModel   DynamicModel? @relation("ModelReference", fields: [refModelId], references: [id])
+  fields    DynamicField[]
+  dataRows  DynamicData[]  // 這一層的資料
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([dynamicModelId, key])
+  // 加上這兩行
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 }
 
-model DynamicModel {
-  id   String @id @default(uuid())
-  name String
-  aId  String
-  a    A      @relation(fields: [aId], references: [id])
+model DynamicField {
+  id              String   @id @default(cuid())
+  dynamicModelId  String
+  dynamicModel    DynamicModel @relation(fields: [dynamicModelId], references: [id])
 
-  fields   DynamicField[]
-  dataRows DynamicData[]
-
-  // 必須加這行！反向關係
-  referencedBy DynamicField[] @relation("ModelReference")
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([aId, name])
+  label  String
+  key    String
+  type   String
+  options Json?
+  required Boolean @default(false)
+  // 加上這兩行
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 }
 
 model DynamicData {
-  id             String       @id @default(uuid())
-  dynamicModelId String
-  dynamicModel   DynamicModel @relation(fields: [dynamicModelId], references: [id])
-  data           Json
+  id              String   @id @default(cuid())
+  dynamicModelId  String
+  dynamicModel    DynamicModel @relation(fields: [dynamicModelId], references: [id])
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  data            Json     // { color: "紅色", size: "L" }
+
+  // 關鍵：這筆資料可以當作下一層的「父資料」
+  children        DynamicData[] @relation("DataTree")
+  parent          DynamicData?  @relation("DataTree", fields: [parentId], references: [id])
+  parentId        String?
+
+// 加上這兩行
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
 }

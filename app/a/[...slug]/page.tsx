@@ -18,9 +18,12 @@ export default function DynamicPage({ params }: { params: Promise<{ slug: string
   const first = slug[0];
   const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(first);
 
-  const apiPath = isUUID
+  // 關鍵修正：只有「單一段且為 UUID」才走 /api/a/[id]
+  const isPureUUIDPage = slug.length === 1 && isUUID;
+
+  const apiPath = isPureUUIDPage
     ? `/api/a/${first}`
-    : `/api/a/path/${slug.join('/')}`;
+    : `/api/a/${slug.join('/')}`;
 
   // 解構 mutate！
   const { data, error, mutate } = useSWR(apiPath, fetcher);
@@ -28,10 +31,16 @@ export default function DynamicPage({ params }: { params: Promise<{ slug: string
   if (error) return <div className="p-8 text-red-500">載入失敗</div>;
   if (!data) return <div className="p-8 text-gray-500">載入中...</div>;
 
-  // === 關鍵：支援三種狀態 ===
-  const isProductRoot = data.type === 'product-root' && data.product;
-  const isDynamicPath = data.type === 'dynamic-path' && data.currentModel?.id;
-  const isModelMissing = !isProductRoot && !isDynamicPath;
+// === 關鍵：支援三種狀態 ===
+const isProductRoot = data.type === 'product-root' && data.product;
+
+// 支援舊的 dynamic-path + 新的 tree-node
+const isDynamicPath = data.type === 'dynamic-path' || data.type === 'tree-node';
+
+// 真正不存在的才進這裡
+const isModelMissing = !isProductRoot && !isDynamicPath;
+
+  console.log("data : ", data , "-- End --")
 
   // === 麵包屑 ===
   const breadcrumbs = data.breadcrumbs || slug;
@@ -168,19 +177,34 @@ export default function DynamicPage({ params }: { params: Promise<{ slug: string
       )}
 
       {/* === 2. 動態層級頁面 === */}
-      {isDynamicPath && (
-        <>
-          <h1 className="mb-4 text-2xl font-bold">
-            {data.isDataRow ? data.currentData?.displayName || '資料' : data.currentModel.name}
-          </h1>
+{/* === 2. 動態層級頁面 === */}
+{isDynamicPath && (
+  <>
+    <h1 className="mb-4 text-2xl font-bold">
+      {data.currentModelName || data.currentModel?.name || '未命名規格表'}
+    </h1>
 
-          <DynamicFormTree
-            modelId={data.currentModel.id}
-            currentPath={slug}
-            isDataRow={data.isDataRow}
-          />
-        </>
-      )}
+    {/* 只有當 currentModel 有 id 時才傳 modelId，否則傳 null（表示入口頁） */}
+{/* 新的（完美） */}
+<DynamicFormTree
+  modelId={data.currentModel?.id || null}
+  currentPath={slug}
+  parentDataId={data.currentParentData?.id || null}  // 加上這行才是正確的！
+/>
+
+    {/* 只有在「規格表入口頁」才顯示「＋ 新增欄位」按鈕 */}
+    {!data.currentModel && data.currentModelName && (
+      <div className="mt-8">
+        <button
+          onClick={() => alert('這裡可以放「編輯欄位」表單')}
+          className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700"
+        >
+          編輯欄位
+        </button>
+      </div>
+    )}
+  </>
+)}
 
       {/* === 3. 模型不存在 === */}
       {isModelMissing && (

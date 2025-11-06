@@ -1,131 +1,80 @@
 // app/api/a/path/[...path]/route.ts
 import { db } from '@/lib/db';
 import { NextResponse } from 'next/server';
-import { DynamicModel, DynamicData, DynamicField } from '@prisma/client';
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// app/api/a/[...path]/route.ts
 export async function GET(
-  _: Request,
+  req: Request,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const { path } = await params;
+  const segments = path ?? [];
 
-  if (path.length === 0) {
-    const products = await db.a.findMany({
-      select: { id: true, title: true, slug: true },
-      orderBy: { createdAt: 'desc' },
-    });
-    return NextResponse.json({ type: 'root', products });
-  }
+  // Step 1: 找商品
+  const first = segments[0];
+  const isUUID = UUID_REGEX.test(first);
+  const product = isUUID
+    ? await db.a.findUnique({ where: { id: first } })
+    : await db.a.findFirst({ where: { slug: first } });
 
-  // 拒絕 UUID 開頭（應走 /api/a/[id]）
-  const first = path[0];
-  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(first);
-  if (isUUID) {
-    return NextResponse.json(
-      { error: 'Use /api/a/[id] for UUID paths' },
-      { status: 400 }
-    );
-  }
+  if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  try {
-    let currentModelId: string | null = null;
-    let currentData: DynamicData | null = null;
-    let aId: string;
+  // Step 2: 從根開始，一層一層往下找
+  let currentParentData: any = null;
+  let currentModel: any = null;
+  let breadcrumbs: string[] = [product.title];
 
-    // Step 1: 找商品（用 slug）
-    const product = await db.a.findUnique({
-      where: { slug: first },
-      select: { id: true },
-    });
+  for (let i = 1; i < segments.length; i++) {
+    const segment = segments[i];
 
-    if (!product) {
-      return NextResponse.json(
-        { error: 'Product not found' },
-        { status: 404 }
-      );
-    }
+    if (i === 1) {
+      // 第一層：找規格表
+      currentModel = await db.dynamicModel.findFirst({
+        where: { aId: product.id, name: segment },
+        include: { fields: true },
+      });
+    } else {
+      // 之後每一層：找上一層資料的子資料
+      const fieldKey = currentModel.fields.find((f: any) => 
+        f.dynamicModel.name === segments[i-1]
+      )?.key;
 
-    aId = product.id;
-    let index = 1;
-
-    while (index < path.length) {
-      const fieldKey = path[index];     // e.g., "顏色"
-      const fieldValue = path[index + 1] || null; // e.g., "紅色"
-
-      // Step 2: 找模型
-      let model: DynamicModel | null = null;
-
-      if (currentModelId) {
-        model = await db.dynamicModel.findUnique({
-          where: { id: currentModelId },
-        });
-      } else {
-        model = await db.dynamicModel.findFirst({
-          where: { aId, name: fieldKey },
-        });
-      }
-
-      if (!model) break;
-      currentModelId = model.id;
-
-      if (!fieldValue) break; // 最後一段是 model
-
-      // Step 3: 找資料列（用 string_contains）
-      const dataRow = await db.dynamicData.findFirst({
+      currentParentData = await db.dynamicData.findFirst({
         where: {
-          dynamicModelId: model.id,
-          data: { string_contains: fieldValue },
+          dynamicModelId: currentModel.id,
+          data: { path: [fieldKey], equals: segment },
+          parentId: currentParentData?.id || null,
         },
       });
-
-      if (dataRow) {
-        currentData = dataRow;
-
-        // Step 4: 找 model 欄位 → 子模型
-        const modelField: DynamicField | null = await db.dynamicField.findFirst({
-          where: {
-            dynamicModelId: model.id,
-            type: 'model',
-            key: fieldKey,
-          },
-        });
-
-        if (modelField?.refModelId) {
-          currentModelId = modelField.refModelId;
-        }
-      }
-
-      index += 2;
     }
 
-    // Step 5: 回傳最終模型
-    const finalModel = currentModelId
-      ? await db.dynamicModel.findUnique({
-          where: { id: currentModelId },
-          include: {
-            fields: {
-              include: { refModel: true },
-              orderBy: { createdAt: 'asc' },
-            },
-            dataRows: {
-              orderBy: { createdAt: 'desc' },
-            },
-          },
-        })
-      : null;
+    if (!currentModel && !currentParentData) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
 
-    return NextResponse.json({
-      currentModel: finalModel,
-      currentData,
-      breadcrumbs: path,
-      isDataRow: path.length % 2 === 1,
-      type: 'dynamic-path',
-    });
-  } catch (error) {
-    console.error('Path resolution error:', error);
-    return NextResponse.json(
-      { error: 'Invalid path' },
-      { status: 400 }
-    );
+    breadcrumbs.push(segment);
   }
+
+  // Step 3: 取得當前層的資料列表
+  const currentDataList = await db.dynamicData.findMany({
+    where: {
+      dynamicModelId: currentModel?.id || null,
+      parentId: currentParentData?.id || null,
+    },
+    include: {
+      dynamicModel: { include: { fields: true } },
+    },
+  });
+
+  return NextResponse.json({
+    type: 'tree-node',
+    product,
+    currentModel,
+    currentParentData,
+    currentDataList,
+    breadcrumbs,
+    depth: segments.length - 1,
+  });
 }
