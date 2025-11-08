@@ -1,80 +1,99 @@
-// app/api/a/path/[...path]/route.ts
+// app/api/a/[...path]/route.ts
 import { db } from '@/lib/db';
 import { NextResponse } from 'next/server';
+// 刪掉這行！不需要 Prisma.DbNull
+// import { Prisma } from '@prisma/client';
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-// app/api/a/[...path]/route.ts
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
-  const { path } = await params;
-  const segments = path ?? [];
+  const { path: segments } = await params;
 
-  // Step 1: 找商品
-  const first = segments[0];
-  const isUUID = UUID_REGEX.test(first);
-  const product = isUUID
-    ? await db.a.findUnique({ where: { id: first } })
-    : await db.a.findFirst({ where: { slug: first } });
+  try {
+    const productId = segments[0];
+    const product = await db.a.findUnique({
+      where: { id: productId },
+      include: { 
+        dynamicModels: {
+          include: { fields: true }
+        }
+      },
+    });
 
-  if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    if (!product) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
 
-  // Step 2: 從根開始，一層一層往下找
-  let currentParentData: any = null;
-  let currentModel: any = null;
-  let breadcrumbs: string[] = [product.title];
-
-  for (let i = 1; i < segments.length; i++) {
-    const segment = segments[i];
-
-    if (i === 1) {
-      // 第一層：找規格表
-      currentModel = await db.dynamicModel.findFirst({
-        where: { aId: product.id, name: segment },
-        include: { fields: true },
-      });
-    } else {
-      // 之後每一層：找上一層資料的子資料
-      const fieldKey = currentModel.fields.find((f: any) => 
-        f.dynamicModel.name === segments[i-1]
-      )?.key;
-
-      currentParentData = await db.dynamicData.findFirst({
-        where: {
-          dynamicModelId: currentModel.id,
-          data: { path: [fieldKey], equals: segment },
-          parentId: currentParentData?.id || null,
-        },
+    if (segments.length === 1) {
+      return NextResponse.json({
+        type: 'product-root',
+        product,
+        breadcrumbs: [product.title],
       });
     }
 
-    if (!currentModel && !currentParentData) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    const modelName = decodeURIComponent(segments[1]);
+    const currentModel = product.dynamicModels.find((m: any) => m.name === modelName);
+
+    if (!currentModel) {
+      return NextResponse.json({
+        type: 'model-missing',
+        breadcrumbs: [product.title, modelName],
+      });
     }
 
-    breadcrumbs.push(segment);
+    let currentParentData: any = null;
+
+    for (let i = 2; i < segments.length; i++) {
+      const segmentValue = decodeURIComponent(segments[i]);
+
+      const results = await db.$queryRaw`
+        SELECT * FROM "DynamicData"
+        WHERE "dynamicModelId" = ${currentModel.id}
+          AND ("parentId" = ${currentParentData?.id} OR "parentId" IS NULL)
+          AND data::text LIKE ${`%${segmentValue}%`}
+        ORDER BY "createdAt" DESC
+        LIMIT 1
+      `;
+
+      const foundData = Array.isArray(results) ? results[0] : results;
+
+      if (!foundData) {
+        return NextResponse.json({
+          type: 'model-missing',
+          breadcrumbs: segments.slice(0, i + 1).map(decodeURIComponent),
+        });
+      }
+
+      currentParentData = foundData as any;
+    }
+
+    // 關鍵修正：用 null，不要用 Prisma.DbNull！
+    const children = await db.dynamicData.findMany({
+      where: {
+        dynamicModelId: currentModel.id,
+        parentId: currentParentData ? currentParentData.id : null,  // 改成 null
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return NextResponse.json({
+      type: 'tree-node',
+      product,
+      currentModel,
+      currentParentData,
+      currentDataList: children,
+      breadcrumbs: [
+        product.title,
+        ...segments.slice(1).map(decodeURIComponent),
+      ],
+    });
+  } catch (error: any) {
+    console.error('GET /api/a/[...path] error:', error);
+    return NextResponse.json(
+      { error: 'Server error', details: error.message },
+      { status: 500 }
+    );
   }
-
-  // Step 3: 取得當前層的資料列表
-  const currentDataList = await db.dynamicData.findMany({
-    where: {
-      dynamicModelId: currentModel?.id || null,
-      parentId: currentParentData?.id || null,
-    },
-    include: {
-      dynamicModel: { include: { fields: true } },
-    },
-  });
-
-  return NextResponse.json({
-    type: 'tree-node',
-    product,
-    currentModel,
-    currentParentData,
-    currentDataList,
-    breadcrumbs,
-    depth: segments.length - 1,
-  });
 }

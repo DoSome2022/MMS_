@@ -33,18 +33,20 @@ export function DynamicForm({
 }) {
   const [isEditingFields, setIsEditingFields] = useState(false);
 
-  // ==================== 模式 1：新增資料 ====================
-  if (model && !isEditingFields) {
-    // 防禦：確保 fields 存在
-    if (!model.fields || !Array.isArray(model.fields)) {
-      return (
-        <div className="p-8 bg-yellow-50 rounded-lg text-center">
-          <p className="text-yellow-800">欄位載入中或尚未建立欄位</p>
-        </div>
-      );
-    }
+  // 無論如何都要先執行 useState
+  // 然後才判斷要不要顯示表單
 
-    // 動態建立 Zod Schema
+  // 預設 schema（避免 undefined）
+  const defaultSchema = z.object({});
+  const { register, handleSubmit, formState: { errors }, reset } = useForm({
+    resolver: zodResolver(defaultSchema),
+  });
+
+  // 只有在需要表單時才建立 schema
+  let schema = defaultSchema;
+  let formReady = false;
+
+  if (model && !isEditingFields && model.fields && Array.isArray(model.fields)) {
     const schemaObj = model.fields.reduce((acc, field) => {
       let validator: z.ZodTypeAny;
 
@@ -86,40 +88,55 @@ export function DynamicForm({
       return acc;
     }, {} as Record<string, z.ZodTypeAny>);
 
-    const schema = z.object(schemaObj);
-    type FormData = z.infer<typeof schema>;
+    schema = z.object(schemaObj);
+    formReady = true;
+  }
 
-    const {
-      register,
-      handleSubmit,
-      formState: { errors },
-      reset,
-    } = useForm<FormData>({
-      resolver: zodResolver(schema),
-    });
+  // 重新建立 useForm（當 schema 變動時）
+  const {
+    register: registerForm,
+    handleSubmit: handleSubmitForm,
+    formState: { errors: formErrors },
+    reset: resetForm,
+  } = useForm<z.infer<typeof schema>>({
+    resolver: zodResolver(schema),
+    mode: 'onBlur',
+  });
 
-    const onSubmit = async (data: FormData) => {
-      try {
-        const res = await fetch(`/api/dynamic-model/${model.id}/data`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...data,
-            parentId: parentDataId || null, // 關鍵：傳遞 parentId
-          }),
-        });
+  const onSubmit = async (data: any) => {
+    if (!model?.id) return;
 
-        if (!res.ok) {
-          const err = await res.text();
-          throw new Error(err || '新增失敗');
-        }
+    try {
+      const res = await fetch(`/api/dynamic-model/${model.id}/data`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...data,
+          parentId: parentDataId || null,
+        }),
+      });
 
-        reset();
-        onSuccess();
-      } catch (err: any) {
-        alert('新增失敗：' + err.message);
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error(err || '新增失敗');
       }
-    };
+
+      resetForm();
+      onSuccess();
+    } catch (err: any) {
+      alert('新增失敗：' + err.message);
+    }
+  };
+
+  // ==================== 渲染邏輯 ====================
+  if (model && !isEditingFields) {
+    if (!formReady) {
+      return (
+        <div className="p-8 bg-yellow-50 rounded-lg text-center">
+          <p className="text-yellow-800">欄位載入中或尚未建立欄位</p>
+        </div>
+      );
+    }
 
     return (
       <div className="mt-8">
@@ -130,12 +147,12 @@ export function DynamicForm({
             onClick={() => setIsEditingFields(true)}
             className="text-blue-600 hover:underline text-sm font-medium"
           >
-            ✏️ 編輯欄位結構
+            Edit fields structure
           </button>
         </div>
 
         <form
-          onSubmit={handleSubmit(onSubmit)}
+          onSubmit={handleSubmitForm(onSubmit)}
           className="p-6 bg-white rounded-xl shadow-sm border border-gray-200 space-y-6"
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -148,8 +165,8 @@ export function DynamicForm({
 
                 {field.type === 'text' && (
                   <input
-                    {...register(field.key)}
-                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                    {...registerForm(field.key)}
+                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
                     placeholder={`請輸入 ${field.label}`}
                   />
                 )}
@@ -157,21 +174,19 @@ export function DynamicForm({
                 {field.type === 'number' && (
                   <input
                     type="number"
-                    {...register(field.key)}
+                    {...registerForm(field.key)}
                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
                   />
                 )}
 
                 {field.type === 'select' && field.options && (
                   <select
-                    {...register(field.key)}
+                    {...registerForm(field.key)}
                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">請選擇 {field.label}</option>
                     {field.options.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
+                      <option key={opt} value={opt}>{opt}</option>
                     ))}
                   </select>
                 )}
@@ -180,16 +195,16 @@ export function DynamicForm({
                   <div className="flex items-center space-x-3">
                     <input
                       type="checkbox"
-                      {...register(field.key)}
-                      className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                      {...registerForm(field.key)}
+                      className="w-5 h-5 text-blue-600 rounded"
                     />
                     <span className="text-gray-700">啟用</span>
                   </div>
                 )}
 
-                {errors[field.key] && (
+                {formErrors[field.key] && (
                   <p className="text-red-500 text-xs mt-1">
-                    {(errors[field.key] as any)?.message || '請修正此欄位'}
+                    {(formErrors[field.key] as any)?.message || '請修正此欄位'}
                   </p>
                 )}
               </div>
@@ -207,10 +222,10 @@ export function DynamicForm({
     );
   }
 
-  // ==================== 模式 2：編輯欄位結構 ====================
+  // ==================== 編輯欄位模式 ====================
   return (
     <div className="mt-8 p-8 bg-gradient-to-br from-purple-50 via-pink-50 to-indigo-50 rounded-2xl border-2 border-purple-200">
-      <h3 className="text-2xl font-bold text-purple-800 mb-6 flex items-center gap-3">
+      <h3 className="text-2xl font-bold text-purple-800 mb-6">
         {model ? `編輯規格表：${model.name}` : '建立第一個欄位'}
       </h3>
 

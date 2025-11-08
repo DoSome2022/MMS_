@@ -10,7 +10,7 @@ const fetcher = (url: string) => fetch(url).then(r => r.json());
 type Props = {
   modelId: string | null;
   currentPath?: string[];
-  parentDataId?: string | null; // 關鍵：追蹤上一層的資料 ID
+  parentDataId?: string | null;
 };
 
 export function DynamicFormTree({
@@ -20,19 +20,18 @@ export function DynamicFormTree({
 }: Props) {
   const depth = currentPath.length;
 
-  // 載入當前模型
+  // 無論如何都要先執行 Hooks！
   const { data: model, mutate: mutateModel } = useSWR(
     modelId ? `/api/dynamic-model/${modelId}` : null,
     fetcher
   );
 
-  // 載入當前層的所有資料（根據 parentDataId 過濾）
   const { data: dataRows = [], mutate: mutateData } = useSWR(
     modelId ? `/api/dynamic-data/${modelId}?parentId=${parentDataId || ''}` : null,
     fetcher
   );
 
-  // 當 modelId 是 null → 規格表入口頁
+  // 現在才開始條件渲染
   if (!modelId) {
     return (
       <div className={`space-y-6 ${depth > 0 ? 'ml-6 border-l-2 border-blue-200 pl-4' : ''}`}>
@@ -46,27 +45,38 @@ export function DynamicFormTree({
     );
   }
 
-  if (!model) return <div>載入中...</div>;
+  // model 還在載入
+  if (model === undefined) {
+    return <div className="text-gray-500">載入中...</div>;
+  }
+
+  // model 載入失敗
+  if (model === null) {
+    return <div className="text-red-500">載入失敗</div>;
+  }
 
   const hasData = dataRows.length > 0;
 
   return (
     <div className={`space-y-6 ${depth > 0 ? 'ml-6 border-l-2 border-blue-200 pl-4' : ''}`}>
-      {/* 無資料 → 顯示新增表單 */}
+      {/* 無資料 */}
       {!hasData && (
         <div className="p-6 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl border">
           <p className="text-lg font-medium text-blue-900 mb-4">
             尚未建立任何資料
           </p>
-          <DynamicForm model={model} parentDataId={parentDataId} onSuccess={() => mutateData()} />
+          <DynamicForm 
+            model={model} 
+            parentDataId={parentDataId} 
+            onSuccess={() => mutateData()} 
+          />
         </div>
       )}
 
-      {/* 有資料 → 顯示樹狀列表 */}
+      {/* 有資料 */}
       {hasData && (
         <div className="space-y-4">
           {dataRows.map((row: any) => {
-            // 取出主要顯示的值（第一個欄位）
             const primaryValue = row.data[model.fields[0]?.key] || '未命名';
 
             return (
@@ -86,7 +96,6 @@ export function DynamicFormTree({
                   </span>
                 </div>
 
-                {/* 顯示所有欄位值 */}
                 <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
                   {model.fields.map((f: any) => (
                     <div key={f.key}>
@@ -98,7 +107,6 @@ export function DynamicFormTree({
                   ))}
                 </div>
 
-                {/* 遞迴顯示子層 */}
                 <div className="mt-4">
                   <DynamicFormTree
                     modelId={modelId}
@@ -112,11 +120,15 @@ export function DynamicFormTree({
         </div>
       )}
 
-      {/* 永遠顯示新增表單（在最下面） */}
+      {/* 永遠顯示新增表單 */}
       {hasData && (
         <div className="mt-8 p-6 bg-green-50 rounded-xl border-2 border-green-200">
           <p className="font-medium text-green-800 mb-4">在此層新增資料</p>
-          <DynamicForm model={model} parentDataId={parentDataId} onSuccess={() => mutateData()} />
+          <DynamicForm 
+            model={model} 
+            parentDataId={parentDataId} 
+            onSuccess={() => mutateData()} 
+          />
         </div>
       )}
     </div>
