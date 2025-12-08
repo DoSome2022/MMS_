@@ -51,20 +51,21 @@ model DynamicField {
   updatedAt      DateTime      @updatedAt
 }
 
+// prisma/schema.prisma
 model DynamicData {
   id              String   @id @default(cuid())
   dynamicModelId  String
   dynamicModel    DynamicModel @relation(fields: [dynamicModelId], references: [id])
 
-  data            Json     // { color: "紅色", size: "L" }
+  data            Json
 
-  // 關鍵：這筆資料可以當作下一層的「父資料」
   children        DynamicData[] @relation("DataTree")
   parent          DynamicData?  @relation("DataTree", fields: [parentId], references: [id])
   parentId        String?
 
-// 加上這兩行
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  // 這一行一定要加！
+  isContentBlock  Boolean  @default(false)
 
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }

@@ -1,13 +1,16 @@
 import { db } from '@/lib/db';
 import { NextResponse } from 'next/server';
 
-
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }  // 注意：params 為 Promise
 ) {
+  // 必須 await params
+  const { id } = await context.params;
+
   const fields = await db.dynamicField.findMany({
-    where: { dynamicModelId: params.id },
+    where: { dynamicModelId: id },
   });
+
   return NextResponse.json({ fields });
 }

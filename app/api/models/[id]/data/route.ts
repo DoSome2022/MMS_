@@ -3,28 +3,58 @@ import { db } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
 
 
-export async function GET(
-  request: NextRequest,
-  context: { params: Promise<{ id: string }> }  // ← 改為 Promise
-) {
-  const params = await context.params;  // ← 必須 await
+// export async function GET(
+//   request: NextRequest,
+//   context: { params: Promise<{ id: string }> }  // ← 改為 Promise
+// ) {
+//   const params = await context.params;  // ← 必須 await
+//   const { searchParams } = new URL(request.url);
+//   const parentId = searchParams.get('parentId');
+
+//   const data = await db.dynamicData.findMany({
+//     where: {
+//       dynamicModelId: params.id,
+//       parentId: parentId || null,
+//     },
+//     include: {
+//       children: {
+//         include: { children: { include: { children: true } } },
+//       },
+//     },
+//     orderBy: { createdAt: 'asc' },
+//   });
+
+//   return NextResponse.json(data);
+// }
+
+// app/api/data/route.ts 或相關的數據獲取函數
+export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
+  const modelId = searchParams.get('modelId');
   const parentId = searchParams.get('parentId');
 
   const data = await db.dynamicData.findMany({
     where: {
-      dynamicModelId: params.id,
+      dynamicModelId: modelId || undefined,
       parentId: parentId || null,
     },
     include: {
       children: {
-        include: { children: { include: { children: true } } },
+        include: {
+          children: {
+            include: {
+              children: true // 4層深度，可調整
+            }
+          }
+        }
       },
     },
-    orderBy: { createdAt: 'asc' },
+    orderBy: {
+      createdAt: 'asc',
+    },
   });
 
-  return NextResponse.json(data);
+  return Response.json({ data });
 }
 
 export async function POST(
